@@ -1,0 +1,5 @@
+{
+  "name": "Taipei ParkRight",
+  "description": "A real-time parking availability dashboard for Taipei. Search for parking lots by address or name using Gemini AI to auto-discover details, and visualize occupancy status.",
+  "requestFramePermissions": []
+}
