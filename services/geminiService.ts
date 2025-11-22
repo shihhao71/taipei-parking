@@ -50,6 +50,7 @@ export const searchParkingLot = async (query: string): Promise<SearchResult> => 
     }
 
     return {
+      id: `gemini-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       name: nameMatch[1].trim(),
       address: addressMatch[1].trim(),
       rates: ratesMatch ? ratesMatch[1].trim() : "Rates info unavailable",

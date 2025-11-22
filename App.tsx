@@ -1,16 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Car, Info, MapPin } from 'lucide-react';
+import { Search, Plus, Car, Info, MapPin, AlertCircle } from 'lucide-react';
 import { ParkingLot, LoadingState, SearchResult } from './types';
-import * as GeminiService from './services/geminiService';
+import * as ParkingService from './services/parkingService';
 import ParkingCard from './components/ParkingCard';
 
-// Helper to generate mock history data
-const generateMockHistory = (capacity: number) => {
-  const hours = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00'];
-  return hours.map(time => ({
-    time,
-    occupied: Math.floor(Math.random() * (capacity * 0.9))
-  }));
+// Helper to generate mock history data that ends with the real current value
+// Since the API doesn't provide historical data, we simulate the past curve 
+// but anchor it to the real current availability.
+const generateMockHistoryWithRealCurrent = (capacity: number, currentAvailable: number) => {
+  const hours = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', 'Now'];
+  return hours.map((time, index) => {
+    if (index === hours.length - 1) {
+      return { time, occupied: capacity - currentAvailable };
+    }
+    // Random curve for past data
+    return {
+      time,
+      occupied: Math.floor(Math.random() * (capacity * 0.9))
+    };
+  });
 };
 
 function App() {
@@ -20,9 +28,9 @@ function App() {
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Load initial data (simulated storage)
+  // Start loading the database immediately when app opens
   useEffect(() => {
-    // Optional: Load from localStorage
+    ParkingService.preloadDatabase();
   }, []);
 
   const handleAddParking = async (e: React.FormEvent) => {
@@ -33,34 +41,40 @@ function App() {
     setErrorMsg(null);
 
     try {
-      // 1. Use Gemini to identify the parking lot from the user query
-      const result: SearchResult = await GeminiService.searchParkingLot(searchQuery);
+      // 1. Search in the official database
+      const result: SearchResult = await ParkingService.searchParking(searchQuery);
       
-      // 2. Fetch (simulate) initial live data
-      const liveData = await GeminiService.fetchLiveStatus(result.capacity);
+      // Check if already added
+      if (parkingLots.some(p => p.id === result.id)) {
+        setErrorMsg("這個停車場已經在列表上了");
+        setSearchStatus(LoadingState.IDLE);
+        return;
+      }
+
+      // 2. Fetch real-time live data
+      const liveData = await ParkingService.getLiveAvailability(result.id);
 
       const newLot: ParkingLot = {
-        id: Date.now().toString(),
+        id: result.id,
         name: result.name,
         address: result.address,
-        rates: result.rates, // Added rates
+        rates: result.rates,
         mapUrl: result.mapUrl,
         totalSpaces: result.capacity,
         availableSpaces: liveData.available,
         isFull: liveData.isFull,
         lastUpdated: new Date(),
-        occupancyHistory: generateMockHistory(result.capacity)
+        occupancyHistory: generateMockHistoryWithRealCurrent(result.capacity, liveData.available)
       };
 
       setParkingLots(prev => [newLot, ...prev]);
       setSearchQuery('');
       setSearchStatus(LoadingState.SUCCESS);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
       setSearchStatus(LoadingState.ERROR);
-      setErrorMsg("Could not find a parking lot with that address/name. Please try again.");
+      setErrorMsg(error.message || "找不到停車場，請檢查連線或輸入完整的中文名稱。");
     } finally {
-      // Reset status after a delay so the user sees the result
       setTimeout(() => setSearchStatus(LoadingState.IDLE), 3000);
     }
   };
@@ -70,25 +84,29 @@ function App() {
     const lot = parkingLots.find(p => p.id === id);
     if (lot) {
       try {
-        const liveData = await GeminiService.fetchLiveStatus(lot.totalSpaces);
+        const liveData = await ParkingService.getLiveAvailability(lot.id);
         setParkingLots(prev => prev.map(p => {
           if (p.id === id) {
+            const occupied = lot.totalSpaces - liveData.available;
+            // Update history: shift and add new point
+            const newHistory = [...p.occupancyHistory.slice(1), { 
+              time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 
+              occupied: occupied 
+            }];
+            
             return {
               ...p,
               availableSpaces: liveData.available,
               isFull: liveData.isFull,
               lastUpdated: new Date(),
-              // Simple shift of history for visual effect
-              occupancyHistory: [...p.occupancyHistory.slice(1), { 
-                time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 
-                occupied: lot.totalSpaces - liveData.available 
-              }]
+              occupancyHistory: newHistory
             };
           }
           return p;
         }));
       } catch (error) {
         console.error("Failed to refresh", error);
+        alert("無法更新即時資訊，請稍後再試。");
       }
     }
     setRefreshingId(null);
@@ -112,9 +130,9 @@ function App() {
             </h1>
           </div>
           <div className="hidden md:flex items-center space-x-4">
-            <span className="text-sm text-gray-500 flex items-center bg-gray-50 px-3 py-1 rounded-full">
+            <span className="text-sm text-green-600 flex items-center bg-green-50 px-3 py-1 rounded-full border border-green-100 font-medium">
               <span className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
-              System Operational
+              北市府資料連線中
             </span>
           </div>
         </div>
@@ -126,8 +144,8 @@ function App() {
         {/* Search / Add Section */}
         <div className="max-w-2xl mx-auto mb-12">
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-extrabold text-gray-900 tracking-tight">Find Parking in Seconds</h2>
-            <p className="mt-2 text-gray-500">Enter an address, landmark, or district in Taipei to track availability.</p>
+            <h2 className="text-3xl font-extrabold text-gray-900 tracking-tight">台北市即時停車資訊</h2>
+            <p className="mt-2 text-gray-500">輸入關鍵字（如：信義、松山、府前）即可查詢即時剩餘車位</p>
           </div>
 
           <form onSubmit={handleAddParking} className="relative group z-10">
@@ -136,7 +154,7 @@ function App() {
               <MapPin className="w-6 h-6 text-gray-400 ml-3" />
               <input 
                 type="text" 
-                placeholder="e.g., 'Taipei 101', 'Daan Park Underground', 'Songshan Station'" 
+                placeholder="請輸入停車場名稱或地址..." 
                 className="flex-grow p-4 text-gray-700 focus:outline-none bg-transparent font-medium"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -147,7 +165,7 @@ function App() {
                 disabled={searchStatus === LoadingState.SEARCHING || !searchQuery}
                 onClick={handleAddParking}
                 className={`
-                  px-6 py-3 rounded-xl font-bold text-white transition-all duration-200 flex items-center shadow-md
+                  px-6 py-3 rounded-xl font-bold text-white transition-all duration-200 flex items-center shadow-md min-w-[120px] justify-center
                   ${searchStatus === LoadingState.SEARCHING 
                     ? 'bg-gray-400 cursor-not-allowed' 
                     : 'bg-blue-600 hover:bg-blue-700 hover:scale-105 active:scale-95'}
@@ -159,12 +177,12 @@ function App() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    Searching...
+                    搜尋中
                   </>
                 ) : (
                   <>
                     <Plus className="w-5 h-5 mr-1" />
-                    Track
+                    新增
                   </>
                 )}
               </button>
@@ -172,9 +190,9 @@ function App() {
           </form>
 
           {errorMsg && (
-            <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-xl border border-red-100 text-sm flex items-center animate-fade-in-down">
-              <Info className="w-4 h-4 mr-2 flex-shrink-0" />
-              {errorMsg}
+            <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-xl border border-red-100 text-sm flex items-start animate-fade-in-down">
+              <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" />
+              <span>{errorMsg}</span>
             </div>
           )}
         </div>
@@ -185,8 +203,8 @@ function App() {
             <div className="bg-blue-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
               <Search className="w-10 h-10 text-blue-300" />
             </div>
-            <h3 className="text-xl font-bold text-gray-900">No parking lots tracked yet</h3>
-            <p className="text-gray-500 mt-2 max-w-sm mx-auto">Start by adding a location above. We'll use AI to find the details for you.</p>
+            <h3 className="text-xl font-bold text-gray-900">尚未新增停車場</h3>
+            <p className="text-gray-500 mt-2 max-w-sm mx-auto">請在上方輸入關鍵字，系統將從台北市開放資料平台取得即時資訊。</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -206,11 +224,10 @@ function App() {
       <footer className="bg-white border-t border-gray-200 py-8 mt-12">
         <div className="max-w-7xl mx-auto px-4 text-center">
           <p className="text-sm text-gray-400">
-            © {new Date().getFullYear()} Taipei ParkRight Demo. 
+            © {new Date().getFullYear()} Taipei ParkRight.
             <br/>
             <span className="text-xs mt-2 block">
-              Note: Real-time data is simulated for this demonstration as direct API access requires specific government keys. 
-              Location data is retrieved via Google Search Grounding.
+              資料來源：臺北市資料大平臺 (data.taipei)
             </span>
           </p>
         </div>

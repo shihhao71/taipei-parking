@@ -12,6 +12,7 @@ export interface ParkingLot {
 }
 
 export interface SearchResult {
+  id: string;
   name: string;
   address: string;
   rates: string;
