@@ -1,10 +1,12 @@
 import { SearchResult } from "../types";
 
-// List of CORS proxies to try in order. 
-// Public proxies can be flaky, so having a fallback is crucial for reliability.
-const PROXY_FACTORIES = [
-  (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+/**
+ * 跨網域代理清單 - 增加多個備援節點
+ */
+const PROXY_LIST = [
+  { name: "AllOrigins", fn: (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` },
+  { name: "CorsProxy.io", fn: (url: string) => `https://corsproxy.io/?url=${encodeURIComponent(url)}` },
+  { name: "CodeTabs", fn: (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}` },
 ];
 
 const STATIC_DATA_URL = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_alldesc.json";
@@ -13,53 +15,65 @@ const LIVE_DATA_URL = "https://tcgbusfs.blob.core.windows.net/blobtcmsv/TCMSV_al
 let cachedParkingDb: any[] | null = null;
 let initPromise: Promise<void> | null = null;
 
-/**
- * Robust fetch function that tries multiple proxies if one fails.
- */
-const fetchJsonWithFallback = async (targetUrl: string) => {
-  for (const createProxyUrl of PROXY_FACTORIES) {
+const fetchWithRetry = async (targetUrl: string) => {
+  const errors: string[] = [];
+
+  for (const proxy of PROXY_LIST) {
     try {
-      const url = createProxyUrl(targetUrl);
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`Status: ${response.status}`);
-      return await response.json();
-    } catch (err) {
-      console.warn(`Proxy attempt failed for ${targetUrl}:`, err);
-      // Continue to next proxy
+      const proxyUrl = proxy.fn(targetUrl);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000); // 增加到 12 秒
+
+      console.log(`[ParkingService] 嘗試使用 ${proxy.name} 連線...`);
+      
+      const response = await fetch(proxyUrl, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' }
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`${proxy.name} 回報 HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      if (data && data.data) {
+        console.log(`[ParkingService] ${proxy.name} 連線成功!`);
+        return data;
+      }
+      throw new Error(`${proxy.name} 回傳格式不正確`);
+    } catch (err: any) {
+      const msg = err.name === 'AbortError' ? `${proxy.name} 連線逾時` : err.message;
+      console.warn(`[ParkingService] ${proxy.name} 失敗:`, msg);
+      errors.push(msg);
     }
   }
-  throw new Error("無法連接到台北市停車資訊伺服器，請檢查網路或稍後再試。");
+  
+  throw new Error(`所有代理伺服器皆連線失敗：\n- ${errors.join('\n- ')}`);
 };
 
-/**
- * Preloads the database in the background.
- */
 export const preloadDatabase = () => {
   if (!initPromise) {
-    initDatabase();
+    initDatabase().catch(err => console.error("資料庫預載失敗", err));
   }
 };
 
-/**
- * Initializes the local database of parking lots from the API.
- */
 const initDatabase = async () => {
   if (cachedParkingDb) return;
-  
-  // Prevent multiple simultaneous requests
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
     try {
-      const json = await fetchJsonWithFallback(STATIC_DATA_URL);
+      const json = await fetchWithRetry(STATIC_DATA_URL);
       if (json && json.data && json.data.park) {
         cachedParkingDb = json.data.park;
       } else {
-        throw new Error("資料格式錯誤 (Invalid Data Format)");
+        throw new Error("無法解析停車場靜態資料包");
       }
-    } catch (error) {
-      initPromise = null; // Reset so we can try again
-      console.error("Failed to fetch parking database", error);
+    } catch (error: any) {
+      initPromise = null;
       throw error;
     }
   })();
@@ -67,63 +81,40 @@ const initDatabase = async () => {
   return initPromise;
 };
 
-/**
- * Searches for a parking lot by name or address in the downloaded database.
- */
 export const searchParking = async (query: string): Promise<SearchResult> => {
   await initDatabase();
-
   if (!cachedParkingDb) {
-    throw new Error("資料庫載入失敗，請重整網頁再試一次。");
+    throw new Error("停車場資料庫尚未下載完成，請稍候。若持續失敗，可能是台北市政府 API 被封鎖。");
   }
 
   const q = query.trim().toLowerCase();
-  
-  // Simple string matching
   const match = cachedParkingDb.find((p: any) => 
     p.name.toLowerCase().includes(q) || 
     p.address.toLowerCase().includes(q)
   );
 
   if (!match) {
-    throw new Error(`找不到符合 "${query}" 的停車場。請嘗試輸入完整的中文名稱，例如「府前廣場」。`);
+    throw new Error(`找不到包含 "${query}" 的停車場，建議嘗試縮短關鍵字（例如：只輸入路名）。`);
   }
 
   return {
     id: match.id,
     name: match.name,
     address: match.address,
-    rates: match.payex,
+    rates: match.payex || "依現場公告為準",
     capacity: parseInt(match.totalcar) || 0,
     mapUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(match.name)}`,
   };
 };
 
-/**
- * Fetches the real-time available spaces for a specific parking lot ID.
- */
 export const getLiveAvailability = async (id: string) => {
-  try {
-    // Fetch live data
-    const json = await fetchJsonWithFallback(LIVE_DATA_URL);
-    const parks = json.data.park;
-    
-    const status = parks.find((p: any) => p.id === id);
-    
-    if (!status) {
-      // If ID is not found in live data (maintenance or error), return fallback
-      return { available: 0, isFull: true }; 
-    }
+  const json = await fetchWithRetry(LIVE_DATA_URL);
+  const status = json.data.park.find((p: any) => p.id === id);
+  const available = status ? Math.max(0, parseInt(status.availablecar)) : 0;
+  return { available, isFull: available === 0 };
+};
 
-    // The API sometimes returns negative numbers for errors, treat as 0
-    const available = Math.max(0, parseInt(status.availablecar));
-    
-    return {
-      available,
-      isFull: available === 0
-    };
-  } catch (error) {
-    console.error("Failed to fetch live status", error);
-    throw new Error("無法取得即時車位資訊");
-  }
+export const getAllLiveStatus = async () => {
+  const json = await fetchWithRetry(LIVE_DATA_URL);
+  return json.data.park as any[];
 };

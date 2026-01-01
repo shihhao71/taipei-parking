@@ -1,23 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Car, Info, MapPin, AlertCircle } from 'lucide-react';
+import { Search, Plus, Car, MapPin, AlertCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { ParkingLot, LoadingState, SearchResult } from './types';
 import * as ParkingService from './services/parkingService';
 import ParkingCard from './components/ParkingCard';
 
-// Helper to generate mock history data that ends with the real current value
-// Since the API doesn't provide historical data, we simulate the past curve 
-// but anchor it to the real current availability.
 const generateMockHistoryWithRealCurrent = (capacity: number, currentAvailable: number) => {
-  const hours = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', 'Now'];
+  const hours = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '現在'];
   return hours.map((time, index) => {
-    if (index === hours.length - 1) {
-      return { time, occupied: capacity - currentAvailable };
-    }
-    // Random curve for past data
-    return {
-      time,
-      occupied: Math.floor(Math.random() * (capacity * 0.9))
-    };
+    if (index === hours.length - 1) return { time, occupied: Math.max(0, capacity - currentAvailable) };
+    return { time, occupied: Math.floor(Math.random() * (capacity * 0.9)) };
   });
 };
 
@@ -27,11 +18,41 @@ function App() {
   const [searchStatus, setSearchStatus] = useState<LoadingState>(LoadingState.IDLE);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [showDebug, setShowDebug] = useState(false);
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
 
-  // Start loading the database immediately when app opens
   useEffect(() => {
     ParkingService.preloadDatabase();
   }, []);
+
+  useEffect(() => {
+    if (parkingLots.length === 0) return;
+    const autoRefresh = async () => {
+      setIsAutoRefreshing(true);
+      try {
+        const allLiveStatus = await ParkingService.getAllLiveStatus();
+        setParkingLots(prev => prev.map(lot => {
+          const liveInfo = allLiveStatus.find(p => p.id === lot.id);
+          if (liveInfo) {
+            const available = Math.max(0, parseInt(liveInfo.availablecar));
+            const occupied = lot.totalSpaces - available;
+            const newHistory = [...lot.occupancyHistory.slice(1), { 
+              time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 
+              occupied: Math.max(0, occupied)
+            }];
+            return { ...lot, availableSpaces: available, isFull: available === 0, lastUpdated: new Date(), occupancyHistory: newHistory };
+          }
+          return lot;
+        }));
+      } catch (err) {
+        console.warn("[AutoRefresh] 自動同步失敗");
+      } finally {
+        setTimeout(() => setIsAutoRefreshing(false), 2000);
+      }
+    };
+    const timer = setInterval(autoRefresh, 30000);
+    return () => clearInterval(timer);
+  }, [parkingLots.length]);
 
   const handleAddParking = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,21 +60,17 @@ function App() {
 
     setSearchStatus(LoadingState.SEARCHING);
     setErrorMsg(null);
+    setShowDebug(false);
 
     try {
-      // 1. Search in the official database
       const result: SearchResult = await ParkingService.searchParking(searchQuery);
-      
-      // Check if already added
       if (parkingLots.some(p => p.id === result.id)) {
-        setErrorMsg("這個停車場已經在列表上了");
+        setErrorMsg("此停車場已在追蹤列表中。");
         setSearchStatus(LoadingState.IDLE);
         return;
       }
 
-      // 2. Fetch real-time live data
       const liveData = await ParkingService.getLiveAvailability(result.id);
-
       const newLot: ParkingLot = {
         id: result.id,
         name: result.name,
@@ -73,41 +90,29 @@ function App() {
     } catch (error: any) {
       console.error(error);
       setSearchStatus(LoadingState.ERROR);
-      setErrorMsg(error.message || "找不到停車場，請檢查連線或輸入完整的中文名稱。");
+      setErrorMsg(error.message || "發生未知錯誤");
     } finally {
-      setTimeout(() => setSearchStatus(LoadingState.IDLE), 3000);
+      setTimeout(() => { if (searchStatus !== LoadingState.ERROR) setSearchStatus(LoadingState.IDLE); }, 2000);
     }
   };
 
   const handleRefresh = async (id: string) => {
     setRefreshingId(id);
-    const lot = parkingLots.find(p => p.id === id);
-    if (lot) {
-      try {
-        const liveData = await ParkingService.getLiveAvailability(lot.id);
-        setParkingLots(prev => prev.map(p => {
-          if (p.id === id) {
-            const occupied = lot.totalSpaces - liveData.available;
-            // Update history: shift and add new point
-            const newHistory = [...p.occupancyHistory.slice(1), { 
-              time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 
-              occupied: occupied 
-            }];
-            
-            return {
-              ...p,
-              availableSpaces: liveData.available,
-              isFull: liveData.isFull,
-              lastUpdated: new Date(),
-              occupancyHistory: newHistory
-            };
-          }
-          return p;
-        }));
-      } catch (error) {
-        console.error("Failed to refresh", error);
-        alert("無法更新即時資訊，請稍後再試。");
-      }
+    try {
+      const liveData = await ParkingService.getLiveAvailability(id);
+      setParkingLots(prev => prev.map(p => {
+        if (p.id === id) {
+          const occupied = p.totalSpaces - liveData.available;
+          const newHistory = [...p.occupancyHistory.slice(1), { 
+            time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 
+            occupied: Math.max(0, occupied)
+          }];
+          return { ...p, availableSpaces: liveData.available, isFull: liveData.isFull, lastUpdated: new Date(), occupancyHistory: newHistory };
+        }
+        return p;
+      }));
+    } catch (error: any) {
+      alert("手動重新整理失敗: " + error.message);
     }
     setRefreshingId(null);
   };
@@ -118,34 +123,26 @@ function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#f8fafc] text-gray-800 font-sans">
-      {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="bg-blue-600 p-2 rounded-lg">
-              <Car className="w-6 h-6 text-white" />
-            </div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-blue-700 to-blue-500 bg-clip-text text-transparent">
-              Taipei ParkRight
-            </h1>
+            <div className="bg-blue-600 p-2 rounded-lg"><Car className="w-6 h-6 text-white" /></div>
+            <h1 className="text-xl font-bold bg-gradient-to-r from-blue-700 to-blue-500 bg-clip-text text-transparent">Taipei ParkRight</h1>
           </div>
-          <div className="hidden md:flex items-center space-x-4">
-            <span className="text-sm text-green-600 flex items-center bg-green-50 px-3 py-1 rounded-full border border-green-100 font-medium">
-              <span className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
-              北市府資料連線中
-            </span>
+          <div className="flex items-center">
+            <div className={`flex items-center space-x-2 px-3 py-1 rounded-full border transition-all duration-500 ${isAutoRefreshing ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-green-50 border-green-100 text-green-600'}`}>
+              <div className={`w-2 h-2 rounded-full ${isAutoRefreshing ? 'bg-blue-500 animate-spin' : 'bg-green-500 animate-pulse'}`}></div>
+              <span className="text-xs font-medium">{isAutoRefreshing ? '同步中...' : '30s 自動同步已啟動'}</span>
+            </div>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-        
-        {/* Search / Add Section */}
         <div className="max-w-2xl mx-auto mb-12">
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-extrabold text-gray-900 tracking-tight">台北市即時停車資訊</h2>
-            <p className="mt-2 text-gray-500">輸入關鍵字（如：信義、松山、府前）即可查詢即時剩餘車位</p>
+            <h2 className="text-3xl font-extrabold text-gray-900 tracking-tight">台北市即時停車查詢</h2>
+            <p className="mt-2 text-gray-500">搜尋停車場名稱或路名（例如：松山、南京、大安）</p>
           </div>
 
           <form onSubmit={handleAddParking} className="relative group z-10">
@@ -154,68 +151,56 @@ function App() {
               <MapPin className="w-6 h-6 text-gray-400 ml-3" />
               <input 
                 type="text" 
-                placeholder="請輸入停車場名稱或地址..." 
+                placeholder="輸入停車場關鍵字..." 
                 className="flex-grow p-4 text-gray-700 focus:outline-none bg-transparent font-medium"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 disabled={searchStatus === LoadingState.SEARCHING}
               />
               <button 
-                type="button"
+                type="submit"
                 disabled={searchStatus === LoadingState.SEARCHING || !searchQuery}
-                onClick={handleAddParking}
-                className={`
-                  px-6 py-3 rounded-xl font-bold text-white transition-all duration-200 flex items-center shadow-md min-w-[120px] justify-center
-                  ${searchStatus === LoadingState.SEARCHING 
-                    ? 'bg-gray-400 cursor-not-allowed' 
-                    : 'bg-blue-600 hover:bg-blue-700 hover:scale-105 active:scale-95'}
-                `}
+                className={`px-6 py-3 rounded-xl font-bold text-white transition-all duration-200 flex items-center shadow-md min-w-[120px] justify-center ${searchStatus === LoadingState.SEARCHING ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700 hover:scale-105 active:scale-95'}`}
               >
-                {searchStatus === LoadingState.SEARCHING ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    搜尋中
-                  </>
-                ) : (
-                  <>
-                    <Plus className="w-5 h-5 mr-1" />
-                    新增
-                  </>
-                )}
+                {searchStatus === LoadingState.SEARCHING ? <RefreshCw className="animate-spin h-5 w-5" /> : <><Plus className="w-5 h-5 mr-1" />搜尋</>}
               </button>
             </div>
           </form>
 
           {errorMsg && (
-            <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-xl border border-red-100 text-sm flex items-start animate-fade-in-down">
-              <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" />
-              <span>{errorMsg}</span>
+            <div className="mt-4 animate-fade-in-down">
+              <div className="p-4 bg-red-50 text-red-700 rounded-xl border border-red-100 text-sm flex items-start justify-between">
+                <div className="flex items-start">
+                  <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" />
+                  <span>{errorMsg.split('\n')[0]}</span>
+                </div>
+                <button 
+                  onClick={() => setShowDebug(!showDebug)}
+                  className="ml-2 text-xs font-bold underline hover:text-red-900 flex items-center"
+                >
+                  {showDebug ? <><ChevronUp className="w-3 h-3 mr-1"/>隱藏</> : <><ChevronDown className="w-3 h-3 mr-1"/>詳細資訊</>}
+                </button>
+              </div>
+              {showDebug && (
+                <div className="mt-2 p-4 bg-gray-900 text-green-400 rounded-xl font-mono text-xs overflow-x-auto whitespace-pre border border-gray-700 shadow-inner">
+                  # 診斷資訊回報：<br/>
+                  {errorMsg}
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* Dashboard Grid */}
         {parkingLots.length === 0 ? (
           <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-gray-300">
-            <div className="bg-blue-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <Search className="w-10 h-10 text-blue-300" />
-            </div>
+            <div className="bg-blue-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6"><Search className="w-10 h-10 text-blue-300" /></div>
             <h3 className="text-xl font-bold text-gray-900">尚未新增停車場</h3>
-            <p className="text-gray-500 mt-2 max-w-sm mx-auto">請在上方輸入關鍵字，系統將從台北市開放資料平台取得即時資訊。</p>
+            <p className="text-gray-500 mt-2 max-w-sm mx-auto">請在上方搜尋並新增停車場，系統將每 30 秒自動更新車位。</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {parkingLots.map(lot => (
-              <ParkingCard 
-                key={lot.id} 
-                lot={lot} 
-                onRefresh={handleRefresh}
-                onRemove={handleRemove}
-                loading={refreshingId === lot.id}
-              />
+              <ParkingCard key={lot.id} lot={lot} onRefresh={handleRefresh} onRemove={handleRemove} loading={refreshingId === lot.id} />
             ))}
           </div>
         )}
@@ -223,13 +208,7 @@ function App() {
 
       <footer className="bg-white border-t border-gray-200 py-8 mt-12">
         <div className="max-w-7xl mx-auto px-4 text-center">
-          <p className="text-sm text-gray-400">
-            © {new Date().getFullYear()} Taipei ParkRight.
-            <br/>
-            <span className="text-xs mt-2 block">
-              資料來源：臺北市資料大平臺 (data.taipei)
-            </span>
-          </p>
+          <p className="text-sm text-gray-400">© {new Date().getFullYear()} Taipei ParkRight. 資料來源：臺北市資料大平臺</p>
         </div>
       </footer>
     </div>
