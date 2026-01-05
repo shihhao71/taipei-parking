@@ -1,3 +1,4 @@
+
 export interface ParkingLot {
   id: string;
   name: string;
@@ -8,6 +9,7 @@ export interface ParkingLot {
   mapUrl?: string;
   lastUpdated: Date;
   isFull: boolean;
+  isPinned?: boolean;
   occupancyHistory: { time: string; occupied: number }[];
 }
 
@@ -18,6 +20,7 @@ export interface SearchResult {
   rates: string;
   mapUrl: string;
   capacity: number;
+  isPinned?: boolean;
 }
 
 export enum LoadingState {

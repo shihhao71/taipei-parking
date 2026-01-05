@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { Search, Plus, Car, MapPin, AlertCircle, RefreshCw, ChevronDown, ChevronUp, Database, Star } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Search, Plus, Car, MapPin, AlertCircle, RefreshCw, Database } from 'lucide-react';
 import { ParkingLot, LoadingState, SearchResult } from './types';
 import * as ParkingService from './services/parkingService';
 import ParkingCard from './components/ParkingCard';
@@ -11,63 +11,53 @@ function App() {
   const [searchStatus, setSearchStatus] = useState<LoadingState>(LoadingState.IDLE);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [showDebug, setShowDebug] = useState(false);
   const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
   const [dbStatus, setDbStatus] = useState<string | null>(null);
 
-  // 1. 初始化：載入常用清單
-  useEffect(() => {
-    const loadQuickAccess = async () => {
-      if (ParkingService.QUICK_ACCESS_LOTS.length === 0) return;
+  // 初始化並立即抓取即時數據
+  const refreshAll = useCallback(async () => {
+    setIsAutoRefreshing(true);
+    try {
+      const allLiveStatus = await ParkingService.getAllLiveStatus();
       
-      try {
-        const allLiveStatus = await ParkingService.getAllLiveStatus();
-        const initialLots: ParkingLot[] = ParkingService.QUICK_ACCESS_LOTS.map(res => {
-          const live = allLiveStatus.find(p => p.id === res.id);
-          const available = live ? Math.max(0, parseInt(live.availablecar)) : 0;
+      setParkingLots(prev => {
+        // 如果還沒有資料，先用固定清單初始化
+        const baseList = prev.length > 0 ? prev : ParkingService.QUICK_ACCESS_LOTS.map(res => ({
+          ...res,
+          availableSpaces: 0,
+          totalSpaces: res.capacity,
+          isFull: false,
+          lastUpdated: new Date(),
+          occupancyHistory: Array(7).fill(0).map((_, i) => ({ 
+            time: `${8 + i * 2}:00`, 
+            occupied: 0 
+          }))
+        }));
+
+        return baseList.map(lot => {
+          const live = allLiveStatus.find(p => p.id === lot.id);
+          const available = live ? Math.max(0, parseInt(live.availablecar)) : lot.availableSpaces;
           return {
-            ...res,
+            ...lot,
             availableSpaces: available,
-            totalSpaces: res.capacity,
             isFull: available === 0,
-            lastUpdated: new Date(),
-            occupancyHistory: Array(7).fill(0).map((_, i) => ({ 
-              time: `${8 + i * 2}:00`, 
-              occupied: Math.floor(Math.random() * res.capacity) 
-            }))
+            lastUpdated: new Date()
           };
         });
-        setParkingLots(initialLots);
-      } catch (e) {
-        console.warn("常用清單即時更新失敗，將顯示預設值");
-      }
-    };
-    loadQuickAccess();
+      });
+    } catch (e) {
+      console.warn("同步失敗");
+    } finally {
+      setTimeout(() => setIsAutoRefreshing(false), 2000);
+    }
   }, []);
 
-  // 2. 自動同步邏輯 (每30秒)
   useEffect(() => {
-    if (parkingLots.length === 0) return;
-    const timer = setInterval(async () => {
-      setIsAutoRefreshing(true);
-      try {
-        const allLiveStatus = await ParkingService.getAllLiveStatus();
-        setParkingLots(prev => prev.map(lot => {
-          const liveInfo = allLiveStatus.find(p => p.id === lot.id);
-          if (liveInfo) {
-            const available = Math.max(0, parseInt(liveInfo.availablecar));
-            return { ...lot, availableSpaces: available, isFull: available === 0, lastUpdated: new Date() };
-          }
-          return lot;
-        }));
-      } finally {
-        setTimeout(() => setIsAutoRefreshing(false), 2000);
-      }
-    }, 30000);
+    refreshAll();
+    const timer = setInterval(refreshAll, 30000);
     return () => clearInterval(timer);
-  }, [parkingLots.length]);
+  }, [refreshAll]);
 
-  // 3. 搜尋邏輯
   const handleAddParking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -94,7 +84,7 @@ function App() {
         }))
       };
 
-      setParkingLots(prev => [newLot, ...prev]);
+      setParkingLots(prev => [...prev, newLot]);
       setSearchQuery('');
       setSearchStatus(LoadingState.SUCCESS);
     } catch (error: any) {
@@ -105,7 +95,7 @@ function App() {
     }
   };
 
-  const handleRefresh = async (id: string) => {
+  const handleManualRefresh = async (id: string) => {
     setRefreshingId(id);
     try {
       const liveData = await ParkingService.getLiveAvailability(id);
@@ -123,14 +113,10 @@ function App() {
             <h1 className="text-lg font-bold text-gray-900">Taipei ParkRight</h1>
           </div>
           <div className="flex items-center space-x-3">
-            {dbStatus && (
-              <div className="text-[10px] bg-amber-50 text-amber-600 px-2 py-1 rounded-full border border-amber-100 flex items-center">
-                <Database className="w-3 h-3 mr-1" /> {dbStatus}
-              </div>
-            )}
+            {dbStatus && <div className="hidden sm:flex text-[10px] bg-amber-50 text-amber-600 px-2 py-1 rounded-full border border-amber-100 items-center"><Database className="w-3 h-3 mr-1" /> {dbStatus}</div>}
             <div className={`flex items-center space-x-2 px-3 py-1 rounded-full border text-xs font-medium transition-colors ${isAutoRefreshing ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-green-50 border-green-100 text-green-600'}`}>
               <div className={`w-1.5 h-1.5 rounded-full ${isAutoRefreshing ? 'bg-blue-500 animate-spin' : 'bg-green-500 animate-pulse'}`}></div>
-              <span>{isAutoRefreshing ? '同步中' : '30s 自動同步'}</span>
+              <span>{isAutoRefreshing ? '同步中' : '30s 自動更新'}</span>
             </div>
           </div>
         </div>
@@ -139,12 +125,12 @@ function App() {
       <main className="max-w-7xl mx-auto px-4 py-8">
         <div className="max-w-xl mx-auto mb-10">
           <form onSubmit={handleAddParking} className="relative group">
-            <div className="absolute inset-0 bg-blue-400 rounded-2xl blur opacity-20 group-focus-within:opacity-40 transition"></div>
+            <div className="absolute inset-0 bg-blue-400 rounded-2xl blur opacity-10 group-focus-within:opacity-30 transition"></div>
             <div className="relative bg-white rounded-2xl shadow-lg border border-gray-100 flex items-center p-1.5">
               <MapPin className="w-5 h-5 text-gray-400 ml-3" />
               <input 
                 type="text" 
-                placeholder="搜尋新停車場..." 
+                placeholder="搜尋並加入其他停車場..." 
                 className="flex-grow p-3 text-sm focus:outline-none"
                 value={searchQuery}
                 onFocus={() => ParkingService.initFullDatabase(setDbStatus)}
@@ -161,26 +147,23 @@ function App() {
           </form>
 
           {errorMsg && (
-            <div className="mt-3 p-3 bg-red-50 border border-red-100 rounded-xl text-xs text-red-600 flex items-center justify-between">
-              <div className="flex items-center"><AlertCircle className="w-4 h-4 mr-2" />{errorMsg}</div>
-              <button onClick={() => setShowDebug(!showDebug)} className="underline font-bold ml-2">詳細</button>
+            <div className="mt-3 p-3 bg-red-50 border border-red-100 rounded-xl text-xs text-red-600 flex items-center">
+              <AlertCircle className="w-4 h-4 mr-2" />{errorMsg}
             </div>
           )}
-          {showDebug && <div className="mt-2 p-3 bg-gray-900 text-green-400 rounded-xl font-mono text-[10px] overflow-auto max-h-32">{errorMsg}</div>}
         </div>
 
-        {parkingLots.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
-            <Search className="w-12 h-12 text-gray-200 mx-auto mb-4" />
-            <p className="text-gray-400 text-sm">請輸入停車場名稱開始追蹤</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {parkingLots.map(lot => (
-              <ParkingCard key={lot.id} lot={lot} onRefresh={handleRefresh} onRemove={(id) => setParkingLots(p => p.filter(x => x.id !== id))} loading={refreshingId === lot.id} />
-            ))}
-          </div>
-        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {parkingLots.map(lot => (
+            <ParkingCard 
+              key={lot.id} 
+              lot={lot} 
+              onRefresh={handleManualRefresh} 
+              onRemove={(id) => setParkingLots(p => p.filter(x => x.id !== id))} 
+              loading={refreshingId === lot.id} 
+            />
+          ))}
+        </div>
       </main>
     </div>
   );

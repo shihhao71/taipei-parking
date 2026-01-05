@@ -1,7 +1,8 @@
-import React from 'react';
+
+import React, { useEffect, useState } from 'react';
 import { ParkingLot } from '../types';
 import AvailabilityChart from './AvailabilityChart';
-import { RefreshCcw, MapPin, Navigation, CircleDollarSign, Clock } from 'lucide-react';
+import { RefreshCcw, MapPin, Navigation, CircleDollarSign, Clock, Wifi, Info, Star, Trash2 } from 'lucide-react';
 
 interface ParkingCardProps {
   lot: ParkingLot;
@@ -11,30 +12,54 @@ interface ParkingCardProps {
 }
 
 const ParkingCard: React.FC<ParkingCardProps> = ({ lot, onRefresh, onRemove, loading }) => {
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  useEffect(() => {
+    if (loading) {
+      setIsUpdating(true);
+      const timer = setTimeout(() => setIsUpdating(false), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [loading]);
+
   const occupancyRate = lot.totalSpaces > 0 
     ? ((lot.totalSpaces - lot.availableSpaces) / lot.totalSpaces) * 100 
     : 0;
   
   let statusColor = 'bg-green-500';
-  let statusText = 'Available';
+  let statusText = '有位';
   
   if (lot.availableSpaces === 0) {
     statusColor = 'bg-red-500';
-    statusText = 'Full';
-  } else if (lot.availableSpaces < 10 || occupancyRate > 90) {
-    statusColor = 'bg-red-500';
-    statusText = 'Very Low';
-  } else if (occupancyRate > 70) {
-    statusColor = 'bg-yellow-500';
-    statusText = 'Busy';
+    statusText = '已滿';
+  } else if (lot.availableSpaces < 5) {
+    statusColor = 'bg-orange-500';
+    statusText = '即將客滿';
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col h-full">
+    <div className={`bg-white rounded-2xl shadow-sm border-2 transition-all duration-300 overflow-hidden flex flex-col h-full relative ${
+      lot.isPinned 
+        ? 'border-blue-200 bg-blue-50/30 ring-1 ring-blue-100 shadow-md' 
+        : 'border-gray-100'
+    }`}>
+      {loading && (
+        <div className="absolute top-0 left-0 w-full h-1 bg-blue-500 animate-pulse z-10"></div>
+      )}
+      
+      {lot.isPinned && (
+        <div className="absolute top-0 right-0 bg-blue-600 text-white text-[9px] font-black px-2 py-0.5 rounded-bl-lg uppercase tracking-tighter z-10">
+          Pinned
+        </div>
+      )}
+      
       <div className="p-6 flex-1">
         <div className="flex justify-between items-start mb-4">
           <div className="flex-1 mr-2">
-            <h3 className="font-bold text-lg text-gray-900 leading-tight line-clamp-1" title={lot.name}>{lot.name}</h3>
+            <div className="flex items-center gap-1.5 mb-1">
+              {lot.isPinned && <Star className="w-4 h-4 text-amber-500 fill-amber-500 flex-shrink-0" />}
+              <h3 className="font-bold text-lg text-gray-900 leading-tight" title={lot.name}>{lot.name}</h3>
+            </div>
             <div className="flex items-center text-gray-500 mt-1.5">
               <MapPin className="w-3.5 h-3.5 mr-1.5 flex-shrink-0 text-blue-500" />
               <p className="text-xs line-clamp-1 text-gray-600" title={lot.address}>{lot.address}</p>
@@ -42,27 +67,29 @@ const ParkingCard: React.FC<ParkingCardProps> = ({ lot, onRefresh, onRemove, loa
             <div className="flex items-center text-gray-500 mt-1.5">
               <CircleDollarSign className="w-3.5 h-3.5 mr-1.5 flex-shrink-0 text-green-600" />
               <p className="text-xs line-clamp-1 text-gray-600 font-medium" title={lot.rates}>
-                {lot.rates.length > 30 ? lot.rates.substring(0, 30) + '...' : lot.rates}
+                {lot.rates}
               </p>
             </div>
           </div>
-          <div className={`${statusColor} text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider flex-shrink-0 shadow-sm`}>
+          <div className={`${statusColor} text-white text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider flex-shrink-0 shadow-sm`}>
             {statusText}
           </div>
         </div>
 
         <div className="flex items-end justify-between mt-6">
-          <div>
-            <p className="text-gray-400 text-xs font-medium uppercase tracking-wider">Available Spaces</p>
+          <div className={`transition-transform duration-300 ${isUpdating ? 'scale-110' : 'scale-100'}`}>
+            <div className="flex items-center space-x-1 mb-1">
+              <p className="text-gray-400 text-[10px] font-bold uppercase tracking-wider">剩餘汽車位</p>
+              <Wifi className={`w-3 h-3 ${loading ? 'text-blue-500 animate-pulse' : 'text-blue-300'}`} />
+            </div>
             <div className="flex items-baseline">
-              <span className={`text-5xl font-bold tracking-tighter ${lot.availableSpaces < 10 ? 'text-red-600' : 'text-gray-800'}`}>
+              <span className={`text-5xl font-bold tracking-tighter transition-colors duration-500 ${lot.availableSpaces < 5 ? 'text-red-600' : 'text-gray-800'}`}>
                 {lot.availableSpaces}
               </span>
               <span className="text-gray-400 text-sm ml-1 font-medium">/ {lot.totalSpaces}</span>
             </div>
           </div>
           
-          {/* Circular Progress */}
           <div className="w-16 h-16 relative flex items-center justify-center">
              <svg className="transform -rotate-90 w-16 h-16">
                 <circle cx="32" cy="32" r="28" stroke="#f3f4f6" strokeWidth="6" fill="transparent" />
@@ -76,21 +103,25 @@ const ParkingCard: React.FC<ParkingCardProps> = ({ lot, onRefresh, onRemove, loa
                   strokeDasharray={175.92} 
                   strokeDashoffset={175.92 - (175.92 * occupancyRate) / 100} 
                   strokeLinecap="round"
-                  className={`${lot.availableSpaces < 10 ? 'text-red-500' : 'text-blue-500'} transition-all duration-1000 ease-out`} 
+                  className={`${lot.availableSpaces < 5 ? 'text-red-500' : 'text-blue-500'} transition-all duration-1000 ease-out`} 
                 />
              </svg>
              <span className="absolute text-[10px] font-bold text-gray-600">{Math.round(occupancyRate)}%</span>
           </div>
         </div>
 
-        {/* Chart is purely visual estimation for now as API history is not available */}
+        <div className={`mt-4 flex items-center p-2 rounded-lg border transition-colors ${lot.isPinned ? 'bg-blue-100/50 border-blue-200' : 'bg-blue-50 border-blue-100'}`}>
+           <Info className="w-3 h-3 text-blue-400 mr-2 flex-shrink-0" />
+           <p className="text-[9px] text-blue-600 leading-tight">同步來源：台北市公用停車場即時資料庫 (與 iTaipei 官網數據同步)</p>
+        </div>
+
         <AvailabilityChart data={lot.occupancyHistory} capacity={lot.totalSpaces} />
       </div>
 
-      <div className="bg-gray-50 px-6 py-3 border-t border-gray-100 flex justify-between items-center">
-        <div className="flex items-center text-xs text-gray-400">
+      <div className={`px-6 py-3 border-t flex justify-between items-center ${lot.isPinned ? 'bg-blue-100/30 border-blue-100' : 'bg-gray-50 border-gray-100'}`}>
+        <div className="flex items-center text-[10px] text-gray-400 font-medium">
           <Clock className="w-3 h-3 mr-1" />
-          {lot.lastUpdated.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+          更新時間：{lot.lastUpdated.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second: '2-digit'})}
         </div>
         <div className="flex gap-2">
            {lot.mapUrl && (
@@ -99,26 +130,28 @@ const ParkingCard: React.FC<ParkingCardProps> = ({ lot, onRefresh, onRemove, loa
               target="_blank" 
               rel="noreferrer"
               className="p-2 rounded-full bg-white text-gray-600 border border-gray-200 hover:bg-blue-50 hover:text-blue-600 transition-colors shadow-sm"
-              title="View on Google Maps"
+              title="查看地圖"
             >
               <Navigation className="w-4 h-4" />
             </a>
-          )}
+           )}
           <button 
             onClick={() => onRefresh(lot.id)} 
             disabled={loading}
             className={`p-2 rounded-full bg-white text-gray-600 border border-gray-200 hover:bg-blue-50 hover:text-blue-600 transition-colors shadow-sm ${loading ? 'animate-spin text-blue-400' : ''}`}
-            title="Refresh Live Data"
+            title="手動刷新"
           >
             <RefreshCcw className="w-4 h-4" />
           </button>
-          <button 
-            onClick={() => onRemove(lot.id)}
-            className="p-2 rounded-full bg-white text-red-400 border border-gray-200 hover:bg-red-50 hover:text-red-600 transition-colors shadow-sm"
-            title="Remove"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-          </button>
+          {!lot.isPinned && (
+            <button 
+              onClick={() => onRemove(lot.id)}
+              className="p-2 rounded-full bg-white text-red-400 border border-gray-200 hover:bg-red-50 hover:text-red-600 transition-colors shadow-sm"
+              title="移除停車場"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>
