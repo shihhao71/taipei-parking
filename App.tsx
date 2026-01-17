@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, Car, AlertCircle, LayoutDashboard, Plus, Loader2, RefreshCw, Zap } from 'lucide-react';
+import { Search, Car, AlertCircle, LayoutDashboard, Plus, Loader2, RefreshCw, Zap, TrendingUp } from 'lucide-react';
 import { ParkingLot, LoadingState } from './types';
 import * as ParkingService from './services/parkingService';
 import ParkingCard from './components/ParkingCard';
@@ -70,7 +70,7 @@ function App() {
       setErrorMsg(null);
     } catch (e: any) {
       console.error("Refresh failed:", e);
-      setErrorMsg("同步失敗：" + e.message);
+      setErrorMsg("北市府資料同步暫時中斷，正在自動重試...");
       setSearchStatus(LoadingState.ERROR);
     }
   }, []);
@@ -80,7 +80,7 @@ function App() {
       refreshAllData(true);
       initialized.current = true;
     }
-    const interval = setInterval(() => refreshAllData(false), 20000); 
+    const interval = setInterval(() => refreshAllData(false), 30000); 
     return () => clearInterval(interval);
   }, [refreshAllData]);
 
@@ -95,7 +95,7 @@ function App() {
     try {
       const result = await ParkingService.searchParking(q);
       if (parkingLots.find(p => p.id === result.id)) {
-        throw new Error("此停車場已在清單中");
+        throw new Error("此停車場已在您的監控清單中");
       }
       const live = await ParkingService.getLiveAvailability(result.id);
       
@@ -118,72 +118,91 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans pb-20">
-      {/* Header with Color Gradient */}
-      <div className="bg-slate-900 h-64 w-full absolute top-0 left-0 z-0">
-        <div className="absolute inset-0 bg-gradient-to-tr from-blue-900/40 to-transparent"></div>
-        <div className="absolute inset-0 opacity-10" style={{backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '32px 32px'}}></div>
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans pb-32">
+      {/* 視覺化的背景區域 */}
+      <div className="bg-slate-900 h-96 w-full absolute top-0 left-0 z-0 overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-900/60 via-slate-900 to-slate-900"></div>
+        {/* 背景裝飾網格 */}
+        <div className="absolute inset-0 opacity-[0.03]" style={{backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '40px 40px'}}></div>
+        {/* 動態炫光 */}
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-500/20 rounded-full blur-[120px] animate-pulse"></div>
+        <div className="absolute top-20 right-0 w-80 h-80 bg-emerald-500/10 rounded-full blur-[100px]"></div>
       </div>
 
-      <div className="relative z-10 max-w-7xl mx-auto px-6 pt-10">
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-8 mb-16">
-          <div className="flex items-center gap-5">
-            <div className="p-4 bg-white rounded-3xl shadow-2xl shadow-blue-900/20">
-              <Car className="w-10 h-10 text-blue-600" />
+      <div className="relative z-10 max-w-7xl mx-auto px-6 pt-16 md:pt-20">
+        <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-12 mb-20">
+          <div className="flex items-center gap-6">
+            <div className="p-5 bg-white rounded-[2rem] shadow-2xl shadow-blue-900/30 ring-8 ring-white/10">
+              <Car className="w-12 h-12 text-blue-600" />
             </div>
             <div>
-              <h1 className="text-4xl font-black tracking-tighter text-white">臺北泊車 <span className="text-blue-400">Live</span></h1>
-              <p className="text-xs font-black text-blue-300/60 uppercase tracking-[0.3em] mt-1 flex items-center gap-2">
-                <Zap className="w-3 h-3" /> Real-time Data Visualization
-              </p>
+              <h1 className="text-5xl font-black tracking-tighter text-white mb-2">
+                臺北泊車 <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">Hub</span>
+              </h1>
+              <div className="flex items-center gap-3">
+                <span className="flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-[10px] font-black text-blue-300 uppercase tracking-widest border border-white/5">
+                  <TrendingUp className="w-3 h-3" /> Live Statistics
+                </span>
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest hidden sm:inline">
+                  臺北市政府公開資料同步中
+                </span>
+              </div>
             </div>
           </div>
 
-          <form onSubmit={handleSearch} className="relative flex-1 max-w-xl group">
-            <div className="absolute -inset-1 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-[1.5rem] blur opacity-25 group-hover:opacity-50 transition duration-1000"></div>
+          <form onSubmit={handleSearch} className="relative flex-1 max-w-2xl group">
+            <div className="absolute -inset-1.5 bg-gradient-to-r from-blue-600 to-emerald-600 rounded-[2rem] blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
             <div className="relative">
               <input
                 type="text"
-                placeholder="輸入關鍵字搜尋停車場 (例: 小巨蛋, 民生...)"
+                placeholder="輸入關鍵字 (例: 小巨蛋, 台北車站, 萬華...)"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-800/80 backdrop-blur-xl border border-slate-700 rounded-[1.2rem] py-4.5 pl-14 pr-6 text-white font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all placeholder:text-slate-500"
+                className="w-full bg-slate-800/80 backdrop-blur-2xl border border-white/10 rounded-[1.8rem] py-5 pl-16 pr-8 text-white text-lg font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all placeholder:text-slate-500 shadow-2xl"
               />
-              <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-400" />
+              <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-7 h-7 text-slate-500" />
               <button 
                 type="submit" 
-                className="absolute right-3 top-1/2 -translate-y-1/2 bg-blue-600 text-white p-2.5 rounded-xl hover:bg-blue-500 transition-all shadow-lg shadow-blue-600/20"
+                className="absolute right-4 top-1/2 -translate-y-1/2 bg-blue-600 text-white p-3.5 rounded-2xl hover:bg-blue-500 transition-all shadow-xl shadow-blue-600/30"
                 disabled={searchStatus === LoadingState.SEARCHING}
               >
-                {searchStatus === LoadingState.SEARCHING ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
+                {searchStatus === LoadingState.SEARCHING ? <Loader2 className="w-6 h-6 animate-spin" /> : <Plus className="w-6 h-6" />}
               </button>
             </div>
           </form>
         </header>
 
         {errorMsg && (
-          <div className="bg-red-500 text-white rounded-2xl p-4 mb-8 flex items-center gap-3 animate-bounce shadow-xl shadow-red-200">
-            <AlertCircle className="w-6 h-6 shrink-0" />
-            <span className="text-sm font-black">{errorMsg}</span>
+          <div className="bg-rose-500 text-white rounded-3xl p-5 mb-12 flex items-center gap-4 animate-in fade-in slide-in-from-top-4 shadow-2xl shadow-rose-200">
+            <AlertCircle className="w-8 h-8 shrink-0" />
+            <div>
+              <p className="font-black text-sm uppercase tracking-widest mb-0.5">系統提示</p>
+              <p className="text-sm font-bold opacity-90">{errorMsg}</p>
+            </div>
           </div>
         )}
 
-        <div className="flex items-center gap-4 mb-10">
-          <div className="bg-white/10 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 flex items-center gap-3">
-            <LayoutDashboard className="w-4 h-4 text-blue-400" />
-            <h2 className="text-xs font-black text-white uppercase tracking-widest">我的監控列表</h2>
+        <div className="flex items-center justify-between gap-6 mb-12">
+          <div className="flex items-center gap-4">
+            <div className="h-10 w-10 bg-white rounded-2xl flex items-center justify-center shadow-lg">
+              <LayoutDashboard className="w-5 h-5 text-slate-800" />
+            </div>
+            <div>
+              <h2 className="text-xs font-black text-white lg:text-slate-800 uppercase tracking-[0.3em]">監控中心 Dashboard</h2>
+              <p className="text-[10px] font-bold text-slate-400 mt-0.5">目前追蹤：{parkingLots.length} 個停車場點位</p>
+            </div>
           </div>
-          <div className="h-px bg-white/10 flex-1" />
+          <div className="h-px bg-slate-200 flex-1 hidden md:block" />
           <button 
             onClick={() => refreshAllData()} 
-            className="flex items-center gap-2 text-[10px] font-black text-white/40 hover:text-white transition-colors bg-white/5 px-4 py-2 rounded-full border border-white/5 uppercase tracking-widest"
+            className="flex items-center gap-2 text-[10px] font-black text-slate-400 hover:text-blue-600 transition-all bg-white px-6 py-3 rounded-2xl shadow-sm border border-slate-100 uppercase tracking-widest"
           >
-            <RefreshCw className="w-3 h-3" /> 手動刷新
+            <RefreshCw className="w-3.5 h-3.5" /> 立即刷新數據
           </button>
         </div>
 
-        {/* 一行兩個佈局: lg:grid-cols-2 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+        {/* 核心 Grid 佈局: lg:grid-cols-2 實現一行兩個左右對稱 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
           {parkingLots.map(lot => (
             <ParkingCard 
               key={lot.id} 
@@ -193,28 +212,46 @@ function App() {
                 ParkingService.getLiveAvailability(id).then(live => {
                   setParkingLots(prev => prev.map(x => x.id === id ? {...x, availableSpaces: live.available, isFull: live.isFull, lastUpdated: new Date()} : x));
                   setRefreshingId(null);
-                });
+                }).catch(() => setRefreshingId(null));
               }}
               onRemove={id => setParkingLots(prev => prev.filter(x => x.id !== id))}
               loading={refreshingId === lot.id}
             />
           ))}
 
+          {/* 新增停車場佔位符 */}
           <button 
-            onClick={() => document.querySelector('input')?.focus()}
-            className="group relative border-4 border-dashed border-slate-200 rounded-[2rem] flex flex-col items-center justify-center py-20 text-slate-300 hover:border-blue-400 hover:text-blue-500 hover:bg-white transition-all min-h-[400px]"
+            onClick={() => {
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+              setTimeout(() => document.querySelector('input')?.focus(), 500);
+            }}
+            className="group relative border-4 border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center py-24 text-slate-300 hover:border-blue-400 hover:bg-white transition-all min-h-[450px]"
           >
-            <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-blue-50 transition-all duration-500">
-              <Plus className="w-10 h-10" />
+            <div className="w-24 h-24 rounded-full bg-slate-100 flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-blue-50 transition-all duration-700">
+              <Plus className="w-12 h-12 text-slate-300 group-hover:text-blue-500" />
             </div>
-            <span className="font-black text-sm uppercase tracking-[0.3em]">新增追蹤停車場</span>
-            <p className="mt-2 text-xs opacity-50 font-bold italic">Click to focus search</p>
+            <span className="font-black text-base uppercase tracking-[0.4em] group-hover:text-slate-600">新增監控點</span>
+            <p className="mt-3 text-[11px] opacity-50 font-bold italic group-hover:opacity-100 transition-opacity">利用上方搜尋框，輸入關鍵字來擴展您的清單</p>
           </button>
         </div>
       </div>
       
-      <footer className="mt-20 text-center">
-        <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.5em]">Taipei City Open Data Integration</p>
+      <footer className="mt-32 border-t border-slate-200 pt-16 text-center">
+        <div className="flex justify-center gap-12 mb-6">
+          <div className="flex flex-col items-center">
+            <span className="text-2xl font-black text-slate-800">30s</span>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">刷新頻率</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <span className="text-2xl font-black text-slate-800">Cloud</span>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">同步引擎</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <span className="text-2xl font-black text-slate-800">100%</span>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">官方資料源</span>
+          </div>
+        </div>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.6em]">Taipei City Smart Transportation Data Platform</p>
       </footer>
     </div>
   );
