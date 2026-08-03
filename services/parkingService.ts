@@ -1,8 +1,12 @@
 
 import { SearchResult } from "../types";
 
-// 使用更穩定的代理，CodeTabs 對於較大的 JSON 檔案支援度較佳
+// 資料來源優先序：
+// 1. 本站 nginx 反向代理 /parking-api/（同源，無 CORS 問題，有 60 秒快取）
+// 2. 以下三個免費公用 proxy 僅作備援 —— 2026-08 曾三個同時失效導致完全無法同步，
+//    不可再拿它們當主要來源
 const PROXY_LIST = [
+  { name: "SameOrigin", fn: (url: string) => `/parking-api/${url.split("/").pop()}` },
   { name: "CodeTabs", fn: (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}` },
   { name: "AllOrigins", fn: (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` },
   { name: "CorsProxy.io", fn: (url: string) => `https://corsproxy.io/?url=${encodeURIComponent(url)}` }
