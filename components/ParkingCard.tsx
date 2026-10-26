@@ -29,6 +29,13 @@ const ParkingCard: React.FC<ParkingCardProps> = ({ lot, onRefresh, onRemove, loa
 
   const config = getStatusConfig();
 
+  // 北市府資料超過 10 分鐘沒更新 = 來源可能停擺，數字不可信（2026-10 JSON 版曾停更一週沒人發現）
+  const staleMin = lot.dataTime ? Math.floor((Date.now() - lot.dataTime.getTime()) / 60000) : null;
+  const isStale = staleMin !== null && staleMin >= 10;
+  const dataTimeText = lot.dataTime
+    ? lot.dataTime.toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+    : '—';
+
   return (
     <div className={`group relative glass-effect rounded-[2.8rem] shadow-premium transition-all duration-700 hover:-translate-y-3 hover:shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-6`}>
       {/* 背景裝飾光點 */}
@@ -61,6 +68,11 @@ const ParkingCard: React.FC<ParkingCardProps> = ({ lot, onRefresh, onRemove, loa
              <span className={`px-5 py-1.5 rounded-full text-[11px] font-black tracking-[0.1em] uppercase text-white shadow-md ${config.bg}`}>
                {config.text}
              </span>
+             {isStale && (
+               <span className="px-5 py-1.5 rounded-full text-[11px] font-black tracking-[0.1em] bg-amber-500 text-white shadow-md">
+                 資料已 {staleMin} 分鐘未更新
+               </span>
+             )}
              {lot.isPinned && (
                <span className="px-5 py-1.5 rounded-full text-[11px] font-black tracking-[0.1em] uppercase bg-slate-800 text-white flex items-center gap-1.5">
                  <Info className="w-3 h-3" /> 我的預設
@@ -150,7 +162,7 @@ const ParkingCard: React.FC<ParkingCardProps> = ({ lot, onRefresh, onRemove, loa
 
       {/* 系統日誌底條 */}
       <div className="px-10 py-4 bg-slate-50 border-t border-slate-100/50 flex justify-between items-center text-[10px] font-bold text-slate-300 uppercase tracking-[0.15em]">
-        <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 opacity-40" /> 更新：{lot.lastUpdated.toLocaleTimeString()}</span>
+        <span className={`flex items-center gap-1.5 ${isStale ? 'text-amber-600' : ''}`}><Clock className="w-3.5 h-3.5 opacity-40" /> 資料時間：{dataTimeText}</span>
         <span className="bg-slate-200/50 px-2.5 py-0.5 rounded-md">ID: {lot.id}</span>
       </div>
     </div>

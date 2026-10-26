@@ -8,6 +8,7 @@ export interface ParkingLot {
   availableSpaces: number;
   mapUrl?: string;
   lastUpdated: Date;
+  dataTime?: Date | null; // 北市府資料本身的時間（UPDATETIME）
   isFull: boolean;
   isPinned?: boolean;
   occupancyHistory: { time: string; occupied: number }[];

@@ -44,7 +44,7 @@ function App() {
     try {
       await ParkingService.initFullDatabase();
       const presets = await ParkingService.getQuickAccessLots();
-      const allLive = await ParkingService.getAllLiveStatus();
+      const { park: allLive, dataTime } = await ParkingService.getLiveSnapshot();
       
       setParkingLots(prev => prev.map(lot => {
         const staticInfo = presets.find(p => p.id === lot.id);
@@ -62,6 +62,7 @@ function App() {
           availableSpaces: avail,
           isFull: avail <= 0,
           lastUpdated: new Date(),
+          dataTime,
           mapUrl: staticInfo?.mapUrl || lot.mapUrl
         };
       }));
@@ -105,6 +106,7 @@ function App() {
         availableSpaces: live.available,
         isFull: live.isFull,
         lastUpdated: new Date(),
+        dataTime: live.dataTime,
         occupancyHistory: []
       };
       
@@ -206,7 +208,7 @@ function App() {
               onRefresh={id => {
                 setRefreshingId(id);
                 ParkingService.getLiveAvailability(id).then(live => {
-                  setParkingLots(prev => prev.map(x => x.id === id ? {...x, availableSpaces: live.available, isFull: live.isFull, lastUpdated: new Date()} : x));
+                  setParkingLots(prev => prev.map(x => x.id === id ? {...x, availableSpaces: live.available, isFull: live.isFull, lastUpdated: new Date(), dataTime: live.dataTime} : x));
                   setRefreshingId(null);
                 }).catch(() => setRefreshingId(null));
               }}
